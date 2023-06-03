@@ -21,7 +21,9 @@ int main(int argc, char *argv)
 	initialize_nonce_result(&nr);
 
 	unsigned int nBits = ENDIAN_SWAP_32(*((unsigned int *)(data + 72)));
+	printf("nBits: %d\n", nBits);
 	set_difficulty(difficulty, nBits);
+	printf("Difficulty: %.8x\n", difficulty);
 
 	int hashes = 1;
 	for (i = 0; i < 32; i++)
