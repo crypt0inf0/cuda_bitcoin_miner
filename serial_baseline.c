@@ -21,9 +21,15 @@ int main(int argc, char *argv)
 	initialize_nonce_result(&nr);
 
 	unsigned int nBits = ENDIAN_SWAP_32(*((unsigned int *)(data + 72)));
-	printf("nBits: %d\n", nBits);
+	char hex[32]; // O tamanho da string deve ser suficiente para armazenar o resultado
+
+	snprintf(hex, sizeof(hex), "%08X", nBits);
+
+	printf("nBits hex: %s\n", hex);
+	printf("nBits int: %d\n", nBits);
 	set_difficulty(difficulty, nBits);
-	printf("Difficulty: %.8x\n", difficulty);
+	printf("Difficulty: %.8X\n", difficulty);
+	return 0;
 
 	int hashes = 1;
 	for (i = 0; i < 32; i++)
