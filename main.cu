@@ -215,7 +215,7 @@ int main(int argc, char **argv)
 	// Output the results
 	if (h_nr.nonce_found)
 	{
-		printf("Nonce found! %.8x\n", h_nr.nonce);
+		printf("Nonce found! %.8x  intNonce: %lld \n", h_nr.nonce, h_nr.nonce);
 		compute_and_print_hash(data, h_nr.nonce);
 	}
 	else
