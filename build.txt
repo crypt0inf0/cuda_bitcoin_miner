@@ -1,0 +1,1 @@
+run on terminal: "nvcc main.cu sha256.c utils.c"
