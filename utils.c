@@ -29,12 +29,16 @@ void initialize_nonce_result(Nonce_result *nr) {
 
 //difficulty MUST be 32 bytes
 void set_difficulty(unsigned char *difficulty, unsigned int nBits) {
-	int i;
-	for(i=0; i<32; i++) {
-		difficulty[i] = 0;
-	}
-	int msb = 32 - ((nBits & 0xff000000) >> 24);
-	difficulty[msb++] = (nBits & 0xff0000) >> 16;
-	difficulty[msb++] = (nBits & 0xff00) >> 8;
-	difficulty[msb] = nBits & 0xff;
+    int i;
+    for (i = 0; i < 32; i++) {
+        difficulty[i] = 0; // Initialize all bytes to 0
+    }
+
+    // Determine the position of the most significant byte (MSB)
+    int msb = 32 - ((nBits >> 24) & 0xFF); // Calculate the position from MSB
+
+    // Store bytes in little-endian format into difficulty array
+    difficulty[msb++] = (nBits >> 16) & 0xFF;
+    difficulty[msb++] = (nBits >> 8) & 0xFF;
+    difficulty[msb] = nBits & 0xFF;
 }
