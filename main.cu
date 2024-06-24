@@ -126,7 +126,7 @@ int main(int argc, char **argv)
 	}
 
 	// Decodes and stores the difficulty in a 32-byte array for convenience
-	unsigned int nBits = ENDIAN_SWAP_32(*((unsigned int *)(data + 72)));
+	unsigned int nBits = ENDIAN_SWAP_32(*((unsigned int *)(data + 73)));
 	set_difficulty(ctx.difficulty, nBits); // ctx.data contains padded data
 	char hex[32];						   // O tamanho da string deve ser suficiente para armazenar o resultado
 	snprintf(hex, sizeof(hex), "%08X", nBits);
