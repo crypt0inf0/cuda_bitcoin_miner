@@ -247,7 +247,7 @@ __constant__ uint32_t k[64] = {
 
 __global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr, void *debug)
 {
-	unsigned int m[64];
+	__shared__ int m[64];
     	unsigned int hash[8];
 	unsigned int a, b, c, d, e, f, g, h, t1, t2;
 	int i, j;
@@ -321,20 +321,24 @@ __global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr, void *debug)
 	}
 #endif
 
-	unsigned char *hhh = (unsigned char *)hash;
-	i = 0;
-	while (hhh[i] == ctx->difficulty[i])
-		i++;
+// Compare with difficulty
+    bool found = true;
+    for (i = 0; i < 8; i++)
+    {
+        if (hash[i] > ctx->difficulty[i])
+        {
+            found = false;
+            break;
+        }
+        else if (hash[i] < ctx->difficulty[i])
+        {
+            break;
+        }
+    }
 
-	if (hhh[i] < ctx->difficulty[i])
-	{
-		// Synchronization Issue
-		// Kind of a hack but it really doesn't matter which nonce
-		// is written to the output, they're all winners :)
-		// Further it's unlikely to even find a nonce let alone 2
-		nr->nonce_found = true;
-		// The nonce here has the correct endianess,
-		// but it must be stored in the block in little endian order
-		nr->nonce = nonce;
-	}
+    if (found)
+    {
+        atomicCAS(&nr->nonce_found, 0, 1);
+        atomicExch(&nr->nonce, nonce);
+    }
 }
