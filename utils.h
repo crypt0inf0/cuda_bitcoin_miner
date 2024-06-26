@@ -19,8 +19,8 @@ extern struct timespec time1, time2;
 	((x & 0x000000ff) << 24))
 
 typedef struct {
-	bool nonce_found;
-	uint32_t nonce;
+    int nonce_found;  // Changed from bool to int
+    unsigned int nonce;
 } Nonce_result;
 
 long int get_execution_time();
