@@ -247,8 +247,8 @@ __constant__ uint32_t k[64] = {
 
 __global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr, void *debug)
 {
-	unsigned int m[64];
-	unsigned int hash[8];
+	__shared__ unsigned int m[64];
+    	unsigned int hash[8];
 	unsigned int a, b, c, d, e, f, g, h, t1, t2;
 	int i, j;
 	unsigned int nonce = NONCE_VAL;
