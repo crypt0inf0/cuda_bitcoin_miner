@@ -34,19 +34,12 @@ extern "C"
 	The most convenient way to form dimensions is to use a square grid of blocks
 	GDIMX = sqrt(2^32/BDIMX)
 */
-#ifndef VERIFY_HASH
+
 #define BDIMX 64   // MAX = 512
 #define GDIMX 8192 // MAX = 65535 = 2^16-1
 #define GDIMY GDIMX
-#endif
 
-#ifdef VERIFY_HASH
-#define BDIMX 1
-#define GDIMX 1
-#define GDIMY 1
-#endif
-
-__global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr, void *debug);
+__global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr);
 
 inline void gpuAssert(cudaError_t code, char *file, int line, bool abort)
 {
@@ -79,7 +72,13 @@ void compute_and_print_hash(unsigned char *data, unsigned int nonce)
 	sha256_update(&ctx, hash, 32);
 	sha256_final(&ctx, hash);
 
-	printf("Hash is:\n");
+  printf("Data is: ");
+	for (i = 0; i < 80; i++)
+	{
+		printf("%02X", data[i]);
+	}
+  printf("\n");
+	printf("Hash is: ");
 	for (i = 0; i < 8; i++)
 	{
 		printf("%.8x ", ENDIAN_SWAP_32(*(((unsigned int *)hash) + i)));
@@ -134,21 +133,6 @@ int main(int argc, char **argv)
 	printf("nBits int: %d\n", nBits);
 	printf("Difficulty: %.8x\n", ctx.difficulty);
 
-	// Data buffer for sending debug information to/from the GPU
-	unsigned char debug[32];
-	unsigned char *d_debug;
-#ifdef VERIFY_HASH
-	SHA256_CTX verify;
-	sha256_init(&verify);
-	sha256_update(&verify, (unsigned char *)data, 80);
-	sha256_final(&verify, debug);
-	sha256_init(&verify);
-	sha256_update(&verify, (unsigned char *)debug, 32);
-	sha256_final(&verify, debug);
-#endif
-	CUDA_SAFE_CALL(cudaMalloc((void **)&d_debug, 32 * sizeof(unsigned char)));
-	CUDA_SAFE_CALL(cudaMemcpy(d_debug, (void *)&debug, 32 * sizeof(unsigned char), cudaMemcpyHostToDevice));
-
 	// Allocate space on Global Memory
 	SHA256_CTX *d_ctx;
 	Nonce_result *d_nr;
@@ -178,7 +162,7 @@ int main(int argc, char **argv)
 		cudaEventRecord(start, 0);
 
 		// Launch Kernel
-		kernel_sha256d<<<DimGrid, DimBlock>>>(d_ctx, d_nr, (void *)d_debug);
+		kernel_sha256d<<<DimGrid, DimBlock>>>(d_ctx, d_nr);
 
 		// Stop timers
 		cudaEventRecord(stop, 0);
@@ -210,7 +194,6 @@ int main(int argc, char **argv)
 	// Free memory on device
 	CUDA_SAFE_CALL(cudaFree(d_ctx));
 	CUDA_SAFE_CALL(cudaFree(d_nr));
-	CUDA_SAFE_CALL(cudaFree(d_debug));
 
 	// Output the results
 	if (h_nr.nonce_found)
@@ -245,7 +228,7 @@ __constant__ uint32_t k[64] = {
 
 #define NONCE_VAL (gridDim.x * blockDim.x * blockIdx.y + blockDim.x * blockIdx.x + threadIdx.x)
 
-__global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr, void *debug)
+__global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr)
 {
 	__shared__ int m[64];
     	unsigned int hash[8];
@@ -313,24 +296,16 @@ __global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr, void *debug)
 	hash[6] = ENDIAN_SWAP_32(g + 0x1f83d9ab);
 	hash[7] = ENDIAN_SWAP_32(h + 0x5be0cd19);
 
-#ifdef VERIFY_HASH
-	unsigned int *ref_hash = (unsigned int *)debug;
-	for (i = 0; i < 8; i++)
-	{
-		cuPrintf("%.8x, %.8x\n", hash[i], ref_hash[i]);
-	}
-#endif
-
 // Compare with difficulty
     bool found = true;
     for (i = 0; i < 8; i++)
     {
-        if (hash[i] > ctx->difficulty[i])
+        if (hash[i] < ctx->difficulty[i])
         {
             found = false;
             break;
         }
-        else if (hash[i] < ctx->difficulty[i])
+        else if (hash[i] > ctx->difficulty[i])
         {
             break;
         }
