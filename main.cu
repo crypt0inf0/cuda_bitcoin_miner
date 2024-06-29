@@ -11,18 +11,16 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <stdbool.h>
-#include <stdint.h>
+#include <cstdint>
+#include <cuda_runtime.h>
 
 #include "cuPrintf.cu"
 #include "cuPrintf.cuh"
-extern "C"
-{
+extern "C" {
 #include "sha256.h"
 #include "utils.h"
 }
 #include "sha256_unrolls.h"
-
 #include "test.h"
 
 // #define VERIFY_HASH		//Execute only 1 thread and verify manually
@@ -41,7 +39,7 @@ extern "C"
 
 __global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr);
 
-inline void gpuAssert(cudaError_t code, char *file, int line, bool abort)
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort = true)
 {
 	if (code != cudaSuccess)
 	{
@@ -53,10 +51,10 @@ inline void gpuAssert(cudaError_t code, char *file, int line, bool abort)
 
 #define CUDA_SAFE_CALL(ans)                         \
 	{                                               \
-		gpuAssert((ans), __FILE__, __LINE__, true); \
+		gpuAssert((ans), __FILE__, __LINE__);       \
 	}
 
-// Warning: This mmodifies the nonce value of data so do it last!
+// Warning: This modifies the nonce value of data so do it last!
 void compute_and_print_hash(unsigned char *data, unsigned int nonce)
 {
 	unsigned char hash[32];
@@ -72,12 +70,12 @@ void compute_and_print_hash(unsigned char *data, unsigned int nonce)
 	sha256_update(&ctx, hash, 32);
 	sha256_final(&ctx, hash);
 
-  printf("Data is: ");
+	printf("Data is: ");
 	for (i = 0; i < 80; i++)
 	{
 		printf("%02X", data[i]);
 	}
-  printf("\n");
+	printf("\n");
 	printf("Hash is: ");
 	for (i = 0; i < 8; i++)
 	{
@@ -88,13 +86,7 @@ void compute_and_print_hash(unsigned char *data, unsigned int nonce)
 
 int main(int argc, char **argv)
 {
-	int i, j;
 	unsigned char *data = test_block;
-
-	/*
-		Host Side Preprocessing
-		The goal here is to prepare and compute everything that will be shared by all threads.
-	*/
 
 	// Initialize Cuda stuff
 	cudaPrintfInit();
@@ -110,26 +102,20 @@ int main(int argc, char **argv)
 	// Compute the shared portion of the SHA-256d calculation
 	SHA256_CTX ctx;
 	sha256_init(&ctx);
-	sha256_update(&ctx, (unsigned char *)data, 80); // ctx.state contains a-h
+	sha256_update(&ctx, data, 80); // ctx.state contains a-h
 	sha256_pad(&ctx);
+
 	// Rearrange endianess of data to optimize device reads
 	unsigned int *le_data = (unsigned int *)ctx.data;
-	unsigned int le;
-	for (i = 0, j = 0; i < 16; i++, j += 4)
+	for (int i = 0, j = 0; i < 16; i++, j += 4)
 	{
-		// Get the data out as big endian
-		// Store it as little endian via x86
-		// On the device side cast the pointer as int* and dereference it correctly
-		le = (ctx.data[j] << 24) | (ctx.data[j + 1] << 16) | (ctx.data[j + 2] << 8) | (ctx.data[j + 3]);
-		le_data[i] = le;
+		le_data[i] = (ctx.data[j] << 24) | (ctx.data[j + 1] << 16) | (ctx.data[j + 2] << 8) | (ctx.data[j + 3]);
 	}
 
 	// Decodes and stores the difficulty in a 32-byte array for convenience
 	unsigned int nBits = ENDIAN_SWAP_32(*((unsigned int *)(data + 72)));
-	set_difficulty(ctx.difficulty, nBits); // ctx.data contains padded data
-	char hex[32];						   // O tamanho da string deve ser suficiente para armazenar o resultado
-	snprintf(hex, sizeof(hex), "%08X", nBits);
-	printf("nBits hex: %s\n", hex);
+	set_difficulty(ctx.difficulty, nBits);
+	printf("nBits hex: %08X\n", nBits);
 	printf("nBits int: %d\n", nBits);
 	printf("Difficulty: %.8x\n", ctx.difficulty);
 
@@ -139,19 +125,15 @@ int main(int argc, char **argv)
 	CUDA_SAFE_CALL(cudaMalloc((void **)&d_ctx, sizeof(SHA256_CTX)));
 	CUDA_SAFE_CALL(cudaMalloc((void **)&d_nr, sizeof(Nonce_result)));
 
-	/*
-		Kernel Execution
-		Measure and launch the kernel and start mining
-	*/
 	// Copy data to device
-	CUDA_SAFE_CALL(cudaMemcpy(d_ctx, (void *)&ctx, sizeof(SHA256_CTX), cudaMemcpyHostToDevice));
-	CUDA_SAFE_CALL(cudaMemcpy(d_nr, (void *)&h_nr, sizeof(Nonce_result), cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(cudaMemcpy(d_ctx, &ctx, sizeof(SHA256_CTX), cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(cudaMemcpy(d_nr, &h_nr, sizeof(Nonce_result), cudaMemcpyHostToDevice));
 
 	float elapsed_gpu;
 	long long int num_hashes;
 #ifdef ITERATE_BLOCKS
 	// Try different block sizes
-	for (i = 1; i <= 512; i++)
+	for (int i = 1; i <= 512; i++)
 	{
 		dim3 DimBlock(i, 1);
 #endif
@@ -178,13 +160,8 @@ int main(int argc, char **argv)
 		printf("%d, %.2f, %.0f, %.2f\n", i, num_hashes / (elapsed_gpu * 1e-3), num_hashes, elapsed_gpu);
 	}
 #endif
-	// Copy nonce result back to host
-	CUDA_SAFE_CALL(cudaMemcpy((void *)&h_nr, d_nr, sizeof(Nonce_result), cudaMemcpyDeviceToHost));
 
-	/*
-		Post Processing
-		Check the results of mining and print out debug information
-	*/
+	CUDA_SAFE_CALL(cudaMemcpy(&h_nr, d_nr, sizeof(Nonce_result), cudaMemcpyDeviceToHost));
 
 	// Cuda Printf output
 	cudaDeviceSynchronize();
@@ -215,7 +192,6 @@ int main(int argc, char **argv)
 	return 0;
 }
 
-// Declare SHA-256 constants
 __constant__ uint32_t k[64] = {
 	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
 	0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -231,21 +207,17 @@ __constant__ uint32_t k[64] = {
 __global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr)
 {
 	__shared__ int m[64];
-    	unsigned int hash[8];
-	unsigned int a, b, c, d, e, f, g, h, t1, t2;
-	int i, j;
+	unsigned int hash[8];
+	unsigned int a, b, c, d, e, f, g, h, i, t1, t2;
 	unsigned int nonce = NONCE_VAL;
 
-	// Compute SHA-256 Message Schedule
 	unsigned int *le_data = (unsigned int *)ctx->data;
-	for (i = 0; i < 16; i++)
+	for (int i = 0; i < 16; i++)
 		m[i] = le_data[i];
-	// Replace the nonce
 	m[3] = nonce;
-	for (; i < 64; ++i)
+	for (int i = 16; i < 64; ++i)
 		m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
 
-	// Copy Initial Values into registers
 	a = ctx->state[0];
 	b = ctx->state[1];
 	c = ctx->state[2];
@@ -255,10 +227,8 @@ __global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr)
 	g = ctx->state[6];
 	h = ctx->state[7];
 
-	// This is a large multiline macro for the SHA256 compression rounds
 	SHA256_COMPRESS_8X
 
-	// Prepare input for next SHA-256
 	m[0] = a + ctx->state[0];
 	m[1] = b + ctx->state[1];
 	m[2] = c + ctx->state[2];
@@ -267,12 +237,11 @@ __global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr)
 	m[5] = f + ctx->state[5];
 	m[6] = g + ctx->state[6];
 	m[7] = h + ctx->state[7];
-	// Pad the input
 	m[8] = 0x80000000;
-	for (i = 9; i < 15; i++)
+	for (int i = 9; i < 15; i++)
 		m[i] = 0x00;
 	m[15] = 0x00000100; // Write out l=256
-	for (i = 16; i < 64; ++i)
+	for (int i = 16; i < 64; ++i)
 		m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
 
 	// Initialize the SHA-256 registers
@@ -296,24 +265,24 @@ __global__ void kernel_sha256d(SHA256_CTX *ctx, Nonce_result *nr)
 	hash[6] = ENDIAN_SWAP_32(g + 0x1f83d9ab);
 	hash[7] = ENDIAN_SWAP_32(h + 0x5be0cd19);
 
-// Compare with difficulty
-    bool found = true;
-    for (i = 0; i < 8; i++)
-    {
-        if (hash[i] < ctx->difficulty[i])
-        {
-            found = false;
-            break;
-        }
-        else if (hash[i] > ctx->difficulty[i])
-        {
-            break;
-        }
-    }
+	// Compare with difficulty
+	bool found = true;
+	for (int i = 0; i < 8; i++)
+	{
+		if (hash[i] < ctx->difficulty[i])
+		{
+			found = false;
+			break;
+		}
+		else if (hash[i] > ctx->difficulty[i])
+		{
+			break;
+		}
+	}
 
-    if (found)
-    {
-        atomicCAS(&nr->nonce_found, 0, 1);
-        atomicExch(&nr->nonce, nonce);
-    }
+	if (found)
+	{
+		atomicCAS(&nr->nonce_found, 0, 1);
+		atomicExch(&nr->nonce, nonce);
+	}
 }
